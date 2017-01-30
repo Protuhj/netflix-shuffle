@@ -78,42 +78,99 @@ function notifyUser(notificationText){
     });
 }
 
+function storeHistory(historyTextNew) {
+  chrome.storage.sync.set({
+    historyText: historyTextNew
+  }, function() {
+    // Do nothing
+  });
+}
+
 chrome.browserAction.onClicked.addListener(function(tab){
     let url = tab.url;
     let urlParams = parseURL(url);
-    loadJSON(function(response){
-        let showList = JSON.parse(response);
+    chrome.storage.sync.get({
+        usePlaylist: false,
+        playlistText: '',
+        historyText: ''
+      }, function(items) {
+        let historyArray = [];
+        let historyText = items.historyText;
+        if (historyText.trim().length > 0) {
+            historyArray = historyText.split(',');
+        }
+        loadJSON(function(response){
         //check to see if we're on a valid page
         if (urlParams["hostname"] != "www.netflix.com") {
             notifyUser("You're not on netflix.com");
             return;
         }
-
+        let showList = JSON.parse(response);
         //check if showList got loaded properly
         if (showList == null){
             notifyUser("The show list did not load");
             return;
         }
+        if (items.usePlaylist) {
+            if (items.playlistText.trim().length > 0) {
+                let playlistArray = items.playlistText.split(',')
+                let showID = playlistArray[Math.floor(Math.random()*playlistArray.length)].trim()
+                if (!showList.hasOwnProperty(showID)){
+                    notifyUser("Invalid show ID: " + showID);
+                    return;
+                }
+                let iterationCount = 0;
+                // Don't let it run forever
+                let maxIterationCount = 1000;
+                //Play a random episode
+                let episodeList = [];
+                let randomEpisodeID = '';
+                let randomEpisodeURL = '';
+                do {
+                    iterationCount++;
+                    episodeList = showList[showID]["episodes"];
+                    randomEpisodeID = episodeList[Math.floor(Math.random()*episodeList.length)];
+                    randomEpisodeURL = "http://netflix.com/watch/" + randomEpisodeID;
+                } while (historyArray.hasOwnProperty(randomEpisodeID)&& (iterationCount < maxIterationCount))
+                if (iterationCount == maxIterationCount) {
+                    notifyUser("Failed to find a valid episode, you probably should clear your history!");
+                } else {
+                    if (historyArray.length == 0) {
+                        historyText = randomEpisodeID;
+                    } else {
+                        historyText += ',' + randomEpisodeID;
+                    }
+                    storeHistory(historyText);
+                    chrome.tabs.query({currentWindow: true, active: true}, function (tab) {
+                        chrome.tabs.update(tab.id, {url: randomEpisodeURL});
+                    });
+                    notifyUser("Playing an episode from " + showList[showID]["showTitle"] + " after " + iterationCount + " searches. History now has " + (historyArray.length + 1) + " items.");
+                }
+            } else {
+                notifyUser("Stored playlist is empty!");
+                return;
+            }
+        } else {
+            let showID = getShowID(url, urlParams, showList);
+            //check if showID was found and showID is in shows.json
+            if (showID == null){
+                notifyUser("You are not on a Netflix page that has a valid show ID.")
+                return;
+            }
+            if (!showList.hasOwnProperty(showID)){
+                notifyUser("The show page you're on is not in our show list. To request that a show be added, please send a note to the developer.")
+                return;
+            }
 
-        let showID = getShowID(url, urlParams, showList);
-
-        //check if showID was found and showID is in shows.json
-        if (showID == null){
-            notifyUser("You are not on a Netflix page that has a valid show ID.")
-            return;
+            //Play a random episode
+            let episodeList = showList[showID]["episodes"];
+            let randomEpisodeID = episodeList[Math.floor(Math.random()*episodeList.length)];
+            let randomEpisodeURL = "http://netflix.com/watch/" + randomEpisodeID;
+            chrome.tabs.query({currentWindow: true, active: true}, function (tab) {
+                chrome.tabs.update(tab.id, {url: randomEpisodeURL});
+            });
+            notifyUser("Playing an episode from " + showList[showID]["showTitle"]);
         }
-        if (!showList.hasOwnProperty(showID)){
-            notifyUser("The show page you're on is not in our show list. To request that a show be added, please send a note to the developer.")
-            return;
-        }
-
-        //Play a random episode
-        let episodeList = showList[showID]["episodes"];
-        let randomEpisodeID = episodeList[Math.floor(Math.random()*episodeList.length)];
-        let randomEpisodeURL = "http://netflix.com/watch/" + randomEpisodeID;
-        chrome.tabs.query({currentWindow: true, active: true}, function (tab) {
-            chrome.tabs.update(tab.id, {url: randomEpisodeURL});
-        });
-        notifyUser("Playing an episode from " + showList[showID]["showTitle"]);
     });
+      });
 });
